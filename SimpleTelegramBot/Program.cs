@@ -16,123 +16,131 @@ namespace SimpleTelegramBot
 {
     internal class Program
     {
-        private const int VideoBytesLimit = 50000 * 1000;
-        private static ITelegramBotClient bot = new TelegramBotClient("1105618244:AAHLmQmptyjG7_LYA8Ue4Nlxy4_Zt5Y0fJE");
-        private static YouTube youTube = YouTube.Default;
+        private const int VideoBytesLimit = 50_000_000;
+        private static readonly ITelegramBotClient Bot = new TelegramBotClient("1105618244:AAHLmQmptyjG7_LYA8Ue4Nlxy4_Zt5Y0fJE");
+        private static readonly YouTube YouTube = YouTube.Default;
 
-        private static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update,
-            CancellationToken cancellationToken)
+        private static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
             Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(update));
 
-
-            if (update.Type == UpdateType.Message)
+            switch (update.Type)
             {
-                var message = update.Message;
-
-                try
+                case UpdateType.Message:
                 {
-                    if (message.Text.ToLower() == "/start")
+                    var message = update.Message;
+                    var chatId = message?.Chat;
+                    var messageText = message?.Text?.ToLower();
+                    try
                     {
-                        await botClient.SendTextMessageAsync(message.Chat, "Hi!", cancellationToken: cancellationToken);
-                        return;
-                    }
-
-                    if (message.Text.ToLower().StartsWith("https://youtu"))
-                    {
-                        try
+                        switch (messageText)
                         {
-                            var video = await youTube.GetVideoAsync(message.Text);
-                            var bytes = await video.GetBytesAsync();
-
-                            if (bytes.Length > VideoBytesLimit)
+                            case "/start":
                             {
+                                await botClient.SendStickerAsync(
+                                     chatId,
+                                     "https://github.com/TelegramBots/book/raw/master/src/docs/sticker-fred.webp",
+                                    cancellationToken: cancellationToken);
+                                await botClient.SendTextMessageAsync(chatId, "Hi!", cancellationToken: cancellationToken);
+                                break;
+                            }
+                            case { } when messageText.StartsWith("https"):
+                            {
+                                var video = await YouTube.GetVideoAsync(messageText);
+                                var bytes = await video.GetUriAsync();
+
+                                if (bytes.Length > VideoBytesLimit)
+                                {
+                                    await botClient.SendTextMessageAsync(chatId, "Oops), at the moment we are not able to process files more than 50 Mb", cancellationToken: cancellationToken);
+                                    return;
+                                }
+
+                                await botClient.SendVideoAsync(chatId, bytes, cancellationToken: cancellationToken);
+                                // await using (var stream = new MemoryStream(bytes))
+                                // {
+                                //     
+                                // }
+                                break;
+                            }
+                            case { } when messageText.StartsWith("https://www.instagram.com"):
+                            {
+                                var res = await InstagramBase.GetMediaById(messageText);
+                                if (res is null)
+                                {
+                                    await botClient.SendTextMessageAsync(chatId, "Oops), something went wrong",
+                                        cancellationToken: cancellationToken);
+                                }
+
+                                await botClient.SendVideoAsync(chatId, new InputOnlineFile(res), cancellationToken: cancellationToken);
+                                break;
+                            }
+                            case { } when messageText.StartsWith("userdata:"):
+                            {
+                                var a = await InstagramBase.GetUserAsync(message.Text.Split(':')[1]);
+
+                                foreach (var d in a.Value)
+                                {
+                                    await botClient.SendPhotoAsync(message.Chat, d.ProfilePicture,
+                                        cancellationToken: cancellationToken);
+
+                                    await botClient.SendTextMessageAsync(message.Chat, d.UserName,
+                                        cancellationToken: cancellationToken);
+                                }
+
+                                var res = (await InstagramBase.GetUserDataByUsername(message.Text.Split(':')[1])).Value;
+                                if (res is null)
+                                {
+                                    await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
+                                        cancellationToken: cancellationToken);
+                                }
+
+
                                 await botClient.SendTextMessageAsync(message.Chat,
-                                    "Oops), at the moment we are not able to process files more than 50 Mb",
+                                    $"{res?.FullName}\r\n-{res?.FollowersCount}\r\n-{res.FriendshipStatus.Following}",
                                     cancellationToken: cancellationToken);
-                                return;
-                            }
 
-                            await using (var stream = new MemoryStream(bytes))
-                            {
-                                await botClient.SendVideoAsync(
-                                    message.Chat,
-                                    new InputOnlineFile(stream),
-                                    video.Info.LengthSeconds,
-                                    cancellationToken: cancellationToken);
-                            }
 
-                            return;
-                        }
-                        catch (Exception e)
-                        {
-                            await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
-                                cancellationToken: cancellationToken);
+                                break;
+                            }
                         }
                     }
-
-                    if (message.Text.ToLower().StartsWith("https://www.instagram.com"))
+                    catch
                     {
-                        var res = await InstagramBase.GetMediaById(message.Text);
-                        if (res is null)
-                        {
-                            await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
-                                cancellationToken: cancellationToken);
-                        }
-
-                        await botClient.SendVideoAsync(
-                            message.Chat,
-                            new InputOnlineFile(res),
+                        await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
                             cancellationToken: cancellationToken);
-
-
-                        return;
-                    }
-
-                    if (message.Text.ToLower().StartsWith("userdata:"))
-                    {
-                        // var a = await InstagramBase.GetMediaByResource(message.Text.Split(':')[1]);
-                        //
-                        // await botClient.SendVideoAsync(
-                        //     message.Chat,
-                        //     new InputOnlineFile(a),
-                        //     cancellationToken: cancellationToken);
-
-
-                        
-                        var a = await InstagramBase.GetUserAsync(message.Text.Split(':')[1]);
-
-                        foreach (var d in a.Value)
-                        {
-                            await botClient.SendPhotoAsync(message.Chat, d.ProfilePicture, cancellationToken: cancellationToken);
-                            
-                            await botClient.SendTextMessageAsync(message.Chat, d.UserName, cancellationToken: cancellationToken);
-                        }
-                        
-                        
-                        
-                        var res = (await InstagramBase.GetUserDataByUsername(message.Text.Split(':')[1])).Value;
-                        if (res is null)
-                        {
-                            await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
-                                cancellationToken: cancellationToken);
-                        }
-
-                        
-                       
-                        await botClient.SendTextMessageAsync(message.Chat,
-                            $"{res?.FullName}\r\n-{res?.FollowersCount}\r\n-{res.FriendshipStatus.Following}",
-                            cancellationToken: cancellationToken);
-
-
-                        return;
                     }
                 }
-                catch
-                {
-                    await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
-                        cancellationToken: cancellationToken);
-                }
+                    break;
+                case UpdateType.Unknown:
+                    break;
+                case UpdateType.InlineQuery:
+                    break;
+                case UpdateType.ChosenInlineResult:
+                    break;
+                case UpdateType.CallbackQuery:
+                    break;
+                case UpdateType.EditedMessage:
+                    break;
+                case UpdateType.ChannelPost:
+                    break;
+                case UpdateType.EditedChannelPost:
+                    break;
+                case UpdateType.ShippingQuery:
+                    break;
+                case UpdateType.PreCheckoutQuery:
+                    break;
+                case UpdateType.Poll:
+                    break;
+                case UpdateType.PollAnswer:
+                    break;
+                case UpdateType.MyChatMember:
+                    break;
+                case UpdateType.ChatMember:
+                    break;
+                case UpdateType.ChatJoinRequest:
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         }
 
@@ -142,11 +150,10 @@ namespace SimpleTelegramBot
             Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(exception));
         }
 
-        static async Task Main(string[] args)
+        private static async Task Main(string[] args)
         {
             await InstagramBase.Initialize();
-            // SaveVideoFromInsta("124");
-            Console.WriteLine("Bot started to work " + bot.GetMeAsync().Result.FirstName);
+            Console.WriteLine("Bot started to work " + Bot.GetMeAsync().Result.FirstName);
 
             var cts = new CancellationTokenSource();
             var cancellationToken = cts.Token;
@@ -156,10 +163,9 @@ namespace SimpleTelegramBot
                 AllowedUpdates = { }, // receive all update types
             };
 
-            bot.StartReceiving(HandleUpdateAsync, HandleErrorAsync, receiverOptions, cancellationToken);
+            Bot.StartReceiving(HandleUpdateAsync, HandleErrorAsync, receiverOptions, cancellationToken);
 
             Console.ReadLine();
-            // SaveVideoToDisk("https://youtu.be/XsSZ_GJsa64");
         }
 
         static void SaveVideoToDisk(string link)
@@ -168,19 +174,6 @@ namespace SimpleTelegramBot
             var video = youTube.GetVideo(link);
 
             File.WriteAllBytes(@"D:\" + video.FullName, video.GetBytes());
-        }
-
-
-        static void SaveVideoFromInsta(string url)
-        {
-            // WebClient client = new WebClient();
-            // client.DownloadFile(
-            //     "https://instagram.fmsq1-1.fna.fbcdn.net/v/t50.2886-16/290805234_733464001236578_5301085803044974116_n.mp4?efg=eyJ2ZW5jb2RlX3RhZyI6InZ0c192b2RfdXJsZ2VuLjcyMC5jbGlwcy5iYXNlbGluZSIsInFlX2dyb3VwcyI6IltcImlnX3dlYl9kZWxpdmVyeV92dHNfb3RmXCJdIn0&_nc_ht=instagram.fmsq1-1.fna.fbcdn.net&_nc_cat=102&_nc_ohc=va-E893kecYAX94V3XV&edm=ALQROFkBAAAA&vs=769082887602227_293746894&_nc_vs=HBksFQAYJEdQSlZWUkZpemotbEZKc0NBQ1N1WEpaelBaRkpicV9FQUFBRhUAAsgBABUAGCRHTlJsWnhIVVZSWXBQUHNCQUhPRGgwX0JQbVV1YnFfRUFBQUYVAgLIAQAoABgAGwAVAAAmxJSTpr3Vuj8VAigCQzMsF0BObtkWhysCGBJkYXNoX2Jhc2VsaW5lXzFfdjERAHX%2BBwA%3D&_nc_rid=1d2272192a&ccb=7-5&oe=62CC8CFA&oh=00_AT8Fc07U-zQJdx0Oe6l7s2qKzaKS3q9TpW-AiMoyFqZ7Ww&_nc_sid=30a2ef",
-            //     @"D:\" + "3333");
-
-            var httpClient = new HttpClient();
-            httpClient.GetStringAsync(new Uri("https://www.instagram.com/reel/Cfq8Bq8Kuvf/?igshid=YmMyMTA2M2Y=",
-                UriKind.Absolute));
         }
     }
 }
