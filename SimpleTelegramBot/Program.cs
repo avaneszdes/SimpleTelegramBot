@@ -11,14 +11,12 @@ using Telegram.Bot.Types.InputFiles;
 using VideoLibrary;
 using Telegram.Bot.Extensions.Polling;
 using Telegram.Bot.Types.ReplyMarkups;
-using File = System.IO.File;
+using Youtube;
 
 namespace SimpleTelegramBot
 {
     internal class Program
     {
-        private const int VideoBytesLimit = 50_000_000;
-
         private static string _tempUrl = string.Empty;
 
         private static readonly ITelegramBotClient Bot =
@@ -37,81 +35,65 @@ namespace SimpleTelegramBot
                 {
                     var message = update.Message;
                     var chatId = message?.Chat;
-                    var messageText = message?.Text?.ToLower();
+                    var messageLowerText = message?.Text?.ToLower();
                     try
                     {
-                        switch (messageText)
+                        switch (messageLowerText)
                         {
                             case "/start":
                             {
-                                await botClient.SendStickerAsync(
-                                    chatId,
+                                await botClient.SendStickerAsync(chatId,
                                     "https://github.com/TelegramBots/book/raw/master/src/docs/sticker-fred.webp",
                                     cancellationToken: cancellationToken);
-                                await botClient.SendTextMessageAsync(chatId, "Hi!",
-                                    cancellationToken: cancellationToken);
+                                await botClient.SendTextMessageAsync(chatId, "Hi!", cancellationToken: cancellationToken);
                                 break;
                             }
-                            case { } when messageText.StartsWith("https"):
+                            case { } when messageLowerText.StartsWith("https"):
                             {
-                                var video = await YouTube.GetVideoAsync(message.Text);
-                                var videoBytes = (await video?.GetBytesAsync()!).Length;
-                                var isUnderBytesLimit = videoBytes > VideoBytesLimit;
-                                _tempUrl = messageText;
-                                if (isUnderBytesLimit)
+                                var video = await YoutubeManager.GetVideoStreamAsync(message.Text);
+                                if (video?.Video == null)
                                 {
-                                    await botClient.SendTextMessageAsync(
-                                        message.Chat,
-                                        "",
-                                        parseMode: ParseMode.MarkdownV2,
-                                        disableWebPagePreview: true,
-                                        replyMarkup: new InlineKeyboardMarkup(new[]
+                                    await botClient.SendTextMessageAsync(message.Chat, "", ParseMode.MarkdownV2,
+                                        disableWebPagePreview: true, replyMarkup: new InlineKeyboardMarkup(new[]
                                         {
                                             new InlineKeyboardButton("1")
                                             {
                                                 Text = "Press to download video",
-                                                Url = messageText
+                                                Url = video?.Uri
                                             },
                                             new InlineKeyboardButton("2")
                                             {
                                                 Text = "Get audio from video",
                                                 CallbackData = message.Text
                                             }
-                                        }),
-                                        cancellationToken: cancellationToken);
+                                        }), cancellationToken: cancellationToken);
                                 }
                                 else
                                 {
-                                    await botClient.SendVideoAsync(
-                                        message.Chat,
-                                        await video.StreamAsync(),
-                                        replyMarkup: new InlineKeyboardMarkup(new[]
+                                    await botClient.SendVideoAsync(message.Chat, video.Video, replyMarkup: new InlineKeyboardMarkup(new[]
                                         {
                                             new InlineKeyboardButton("2")
                                             {
                                                 Text = "Get audio from video",
-                                                CallbackData =  message.Text
+                                                CallbackData = message.Text
                                             }
-                                        }),
-                                        cancellationToken: cancellationToken);
+                                        }), cancellationToken: cancellationToken);
                                 }
 
                                 break;
                             }
-                            case { } when messageText.StartsWith("https://www.instagram.com"):
+                            case { } when messageLowerText.StartsWith("https://www.instagram.com"):
                             {
-                                var res = await InstagramBase.GetMediaById(messageText);
-                                if (res is null)
+                                var mediaStream = await InstagramBase.GetMediaById(messageLowerText);
+                                if (mediaStream is null)
                                 {
-                                    await botClient.SendTextMessageAsync(chatId, "Oops), something went wrong",
-                                        cancellationToken: cancellationToken);
+                                    await botClient.SendTextMessageAsync(chatId, "Oops), something went wrong", cancellationToken: cancellationToken);
                                 }
 
-                                await botClient.SendVideoAsync(chatId, new InputOnlineFile(res),
-                                    cancellationToken: cancellationToken);
+                                await botClient.SendVideoAsync(chatId, new InputOnlineFile(mediaStream), cancellationToken: cancellationToken);
                                 break;
                             }
-                            case { } when messageText.StartsWith("userdata:"):
+                            case { } when messageLowerText.StartsWith("userdata:"):
                             {
                                 var a = await InstagramBase.GetUserAsync(message.Text.Split(':')[1]);
 
@@ -143,83 +125,34 @@ namespace SimpleTelegramBot
                     }
                     catch (Exception ex)
                     {
-                        await botClient.SendTextMessageAsync(message.Chat, ex.Message,
-                            cancellationToken: cancellationToken);
+                        await botClient.SendTextMessageAsync(chatId, ex.Message, cancellationToken: cancellationToken);
                     }
+
+                    break;
                 }
-                    break;
-                case UpdateType.Unknown:
-                    break;
-                case UpdateType.InlineQuery:
-                    break;
-                case UpdateType.ChosenInlineResult:
-                    break;
                 case UpdateType.CallbackQuery:
 
                     var query = update.CallbackQuery?.Data;
+                    var chat = update.CallbackQuery?.Message?.Chat;
                     switch (query)
                     {
                         case {Length: > 0}:
                         {
                             try
                             {
-                                var video = await YouTube.GetVideoAsync(update.CallbackQuery.Data);
-                                await using (var contentAsMemoryStream = new MemoryStream(await video.GetBytesAsync()))
-                                {
-                                    await using (var outStream = new MemoryStream())
-                                    {
-                                        await using (var mediaReader =
-                                            new StreamMediaFoundationReader(contentAsMemoryStream))
-                                        {
-                                            if (mediaReader.CanRead)
-                                            {
-                                                mediaReader.Seek(0, SeekOrigin.Begin);
-
-                                                WaveFileWriter.WriteWavFileToStream(outStream, mediaReader);
-                                                outStream.Seek(0, SeekOrigin.Begin);
-
-                                                await botClient.SendAudioAsync(update.CallbackQuery?.Message?.Chat,
-                                                    outStream, title: video.Title,
-                                                    cancellationToken: cancellationToken);
-                                            }
-                                        }
-                                    }
-                                }
+                                var audio = await YoutubeManager.ExtractAudioStreamAsync(query);
+                                await botClient.SendAudioAsync(chat, audio.Audio, title: audio.Title, cancellationToken: cancellationToken);
                             }
                             catch (Exception ex)
                             {
-                                await botClient.SendTextMessageAsync(update.CallbackQuery?.Message?.Chat, ex.Message,
-                                    cancellationToken: cancellationToken);
+                                await botClient.SendTextMessageAsync(chat, ex.Message, cancellationToken: cancellationToken);
                             }
-                           
 
                             break;
                         }
                     }
 
                     break;
-                case UpdateType.EditedMessage:
-                    break;
-                case UpdateType.ChannelPost:
-                    break;
-                case UpdateType.EditedChannelPost:
-                    break;
-                case UpdateType.ShippingQuery:
-                    break;
-                case UpdateType.PreCheckoutQuery:
-                    break;
-                case UpdateType.Poll:
-                    break;
-                case UpdateType.PollAnswer:
-                    break;
-                case UpdateType.MyChatMember:
-                    break;
-                case UpdateType.ChatMember:
-                    break;
-                case UpdateType.ChatJoinRequest:
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
             }
         }
 
@@ -239,20 +172,12 @@ namespace SimpleTelegramBot
 
             var receiverOptions = new ReceiverOptions
             {
-                AllowedUpdates = { }, // receive all update types
+                AllowedUpdates = { },
             };
 
             Bot.StartReceiving(HandleUpdateAsync, HandleErrorAsync, receiverOptions, cancellationToken);
 
             Console.ReadLine();
-        }
-
-        static void SaveVideoToDisk(string link)
-        {
-            var youTube = YouTube.Default;
-            var video = youTube.GetVideo(link);
-
-            File.WriteAllBytes(@"D:\" + video.FullName, video.GetBytes());
         }
     }
 }
