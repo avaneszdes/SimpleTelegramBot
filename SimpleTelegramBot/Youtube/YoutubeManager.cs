@@ -3,8 +3,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using NAudio.Wave;
 using VideoLibrary;
+using Youtube;
 
-namespace Youtube
+namespace SimpleTelegramBot.Youtube
 {
     public class YoutubeManager
     {
