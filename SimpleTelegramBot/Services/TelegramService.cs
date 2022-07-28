@@ -1,7 +1,6 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Entities;
 using Instagram;
 using Microsoft.Extensions.Options;
 using SimpleTelegramBot.Configuration;
@@ -11,7 +10,6 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.InputFiles;
 using Telegram.Bot.Types.ReplyMarkups;
-using InstagramBase = SimpleTelegramBot.Instagram.InstagramBase;
 
 namespace SimpleTelegramBot.Services
 {
@@ -38,12 +36,11 @@ namespace SimpleTelegramBot.Services
             {
                 case UpdateType.Message:
                 {
-                    var message = update.Message;
-                    var chatId = message?.Chat;
-                    var messageLowerText = message?.Text?.ToLower();
+                    var message = update.Message?.Text;
+                    var chatId = update.Message?.Chat;
                     try
                     {
-                        switch (messageLowerText)
+                        switch (message)
                         {
                             case "/start":
                             {
@@ -54,12 +51,12 @@ namespace SimpleTelegramBot.Services
                                     cancellationToken: cancellationToken);
                                 break;
                             }
-                            case { } when messageLowerText.StartsWith("https://you"):
+                            case { } when message.StartsWith("https://you"):
                             {
-                                var video = await YoutubeManager.GetVideoStreamAsync(message.Text);
+                                var video = await YoutubeManager.GetVideoStreamAsync(message);
                                 if (video?.Video == null)
                                 {
-                                    await botClient.SendTextMessageAsync(message.Chat, "", ParseMode.MarkdownV2,
+                                    await botClient.SendTextMessageAsync(chatId, video.Title, ParseMode.MarkdownV2,
                                         disableWebPagePreview: true, replyMarkup: new InlineKeyboardMarkup(new[]
                                         {
                                             new InlineKeyboardButton("1")
@@ -70,30 +67,28 @@ namespace SimpleTelegramBot.Services
                                             new InlineKeyboardButton("2")
                                             {
                                                 Text = "Get audio from video",
-                                                CallbackData = message.Text
+                                                CallbackData = message
                                             }
                                         }), cancellationToken: cancellationToken);
                                 }
                                 else
                                 {
-                                    await botClient.SendVideoAsync(message.Chat, video.Video,
+                                    await botClient.SendVideoAsync(chatId, video.Video,
                                         replyMarkup: new InlineKeyboardMarkup(new[]
                                         {
                                             new InlineKeyboardButton("2")
                                             {
                                                 Text = "Get audio from video",
-                                                CallbackData = message.Text
+                                                CallbackData = message
                                             }
                                         }), cancellationToken: cancellationToken);
                                 }
 
                                 break;
                             }
-                            case { } when messageLowerText.StartsWith("https://www.instagram.com"):
+                            case { } when message.StartsWith("https://www.instagram.com"):
                             {
-                                
-                                
-                                var mediaStream = await InstagramBase.GetMediaById(messageLowerText);
+                                var mediaStream = await InstagramBase.GetMediaById(message);
                                 if (mediaStream is null)
                                 {
                                     await botClient.SendTextMessageAsync(chatId, "Oops), something went wrong",
@@ -104,28 +99,28 @@ namespace SimpleTelegramBot.Services
                                     cancellationToken: cancellationToken);
                                 break;
                             }
-                            case { } when messageLowerText.StartsWith("userdata:"):
+                            case { } when message.StartsWith("userdata:"):
                             {
-                                var a = await InstagramBase.GetUserAsync(message.Text.Split(':')[1]);
+                                var a = await InstagramBase.GetUserAsync(message.Split(':')[1]);
 
                                 foreach (var d in a.Value)
                                 {
-                                    await botClient.SendPhotoAsync(message.Chat, d.ProfilePicture,
+                                    await botClient.SendPhotoAsync(chatId, d.ProfilePicture,
                                         cancellationToken: cancellationToken);
 
-                                    await botClient.SendTextMessageAsync(message.Chat, d.UserName,
+                                    await botClient.SendTextMessageAsync(chatId, d.UserName,
                                         cancellationToken: cancellationToken);
                                 }
 
-                                var res = (await InstagramBase.GetUserDataByUsername(message.Text.Split(':')[1])).Value;
+                                var res = (await InstagramBase.GetUserDataByUsername(message.Split(':')[1])).Value;
                                 if (res is null)
                                 {
-                                    await botClient.SendTextMessageAsync(message.Chat, "Oops), something went wrong",
+                                    await botClient.SendTextMessageAsync(chatId, "Oops), something went wrong",
                                         cancellationToken: cancellationToken);
                                 }
 
 
-                                await botClient.SendTextMessageAsync(message.Chat,
+                                await botClient.SendTextMessageAsync(chatId,
                                     $"{res?.FullName}\r\n-{res?.FollowersCount}\r\n-{res.FriendshipStatus.Following}",
                                     cancellationToken: cancellationToken);
 
@@ -152,7 +147,7 @@ namespace SimpleTelegramBot.Services
                             try
                             {
                                 var audio = await YoutubeManager.ExtractAudioStreamAsync(query);
-                                await botClient.SendAudioAsync(chat, audio.Audio, title: audio.Title,
+                                await botClient.SendAudioAsync(chat, new InputOnlineFile(audio.Audio, audio.Title + ".mp3" ), title: audio.Title,
                                     cancellationToken: cancellationToken);
                             }
                             catch (Exception ex)
